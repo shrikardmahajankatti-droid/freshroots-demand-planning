@@ -64,15 +64,33 @@ Or from the CLI: `npx vercel` (preview), then `npx vercel --prod`.
 
 ## UI
 
-The app is laid out as a SaaS workspace: a dark sidebar that shows the live status of every pipeline box, a sticky top bar, and box-labelled cards. On first visit the demo workspace loads and runs automatically, so the dashboard is never empty. **Load demo data** in the top bar reloads it, and each file card has **Upload / Replace** for your own CSVs.
+The app is a tabbed SaaS workspace built for Raghav to oversee a planning cycle. The demo workspace loads and runs automatically on first visit.
+
+**Outputs**
+
+| Tab | What it shows |
+|---|---|
+| Overview | Cycle progress (data → forecast → Raghav review → procurement → export), KPI tiles, a plain-English briefing, stock health ranked by urgency, weeks-of-cover charts |
+| Exceptions | Gate 1: each exception with why/what-to-check, a sparkline, key numbers and Approve / Override |
+| Action list | Every SKU with filters, search, a cover gauge and CSV export. Click a row for the SKU drawer: trend chart, step-by-step rule trace, reason and decision |
+| Purchase orders | Gate 2: reorder lines grouped by distributor, sign-off checklist, approve and download the PO CSV |
+
+**Configure**
+
+| Tab | What it shows |
+|---|---|
+| Rules & settings | Rules v1 rubric with live examples, action matrix, review (exception) criteria, data rejection rules, the kill switch (override rate vs 30%) with the override log, guardrails, settings and assumptions |
+| Data sources | Upload / replace the 5 CSVs, load summary, weeks of history per SKU, rejected rows |
+
+The class component map (Boxes 1–8) is still traceable: turn on **Settings → Show component-map labels** to tag each screen with its box.
 
 Four [React Bits](https://reactbits.dev) components are used (copied into `components/reactbits/`). All of them respect `prefers-reduced-motion`:
 
 | Component | Where |
 |---|---|
-| Aurora | Soft WebGL background in the Box 1 banner only (client-only, dark fallback) |
+| Aurora | Soft WebGL background in the Overview banner only (client-only, dark fallback) |
 | ShinyText | Banner headline |
-| SpotlightCard | KPI tiles in Box 6 |
+| SpotlightCard | KPI tiles on Overview |
 | CountUp | KPI numbers |
 
 React Bits is MIT + Commons Clause: free to use in this app, but the components themselves may not be resold as a template or component pack. Icons come from lucide-react.
@@ -82,9 +100,11 @@ React Bits is MIT + Commons Clause: free to use in this app, but the components 
 ```
 lib/rules.ts            all rule logic: pure, no UI, no AI (parsing, joins, R1–R5, actions, exceptions, gates, CSV)
 lib/csv.ts              browser CSV parsing (papaparse) + header validation + downloads
-app/page.tsx            the 8-box UI (state in memory only)
+app/page.tsx            app shell: sidebar, top bar, tab switching
 components/Charts.tsx   recharts: weeks-of-cover bars, sales trend
-components/ui.tsx       shared UI: box cards, chips, buttons, KPI tiles, toasts
+components/workspace.tsx  all app state and actions (React context)
+components/views/       one file per tab + the SKU drawer
+components/ui.tsx       shared UI: cards, chips, buttons, KPI tiles, toasts
 components/reactbits/   React Bits components (Aurora, ShinyText, SpotlightCard, CountUp)
 app/api/explain/route.ts  the only server route: Claude call + JSON validation
 tests/rules.test.ts     acceptance tests

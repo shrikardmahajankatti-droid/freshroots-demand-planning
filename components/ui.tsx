@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { CheckCircle2, Info, TriangleAlert, X } from "lucide-react";
 import CountUp from "@/components/reactbits/CountUp/CountUp";
 import SpotlightCard from "@/components/reactbits/SpotlightCard/SpotlightCard";
@@ -46,39 +46,105 @@ export function Callout({ tone, icon = true, children }: { tone: Tone; icon?: bo
   );
 }
 
-/** Section card labelled with its box number from the component map. */
-export function BoxCard({
-  n,
-  name,
-  hint,
+/** Component-map labels ("Box 6") are hidden by default; Settings can turn them on. */
+export const BoxLabelContext = createContext(false);
+
+export function BoxTag({ n }: { n: number | string }) {
+  const show = useContext(BoxLabelContext);
+  if (!show) return null;
+  return (
+    <span className="inline-flex items-center rounded-md bg-slate-900 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
+      Box {n}
+    </span>
+  );
+}
+
+/** Standard content card. `box` maps it to the component map when labels are on. */
+export function Card({
+  title,
+  sub,
   icon,
   right,
+  box,
   children,
   className = "",
+  bodyClassName = "p-5",
 }: {
-  n: number | string;
-  name: string;
-  hint?: string;
+  title?: ReactNode;
+  sub?: ReactNode;
   icon?: ReactNode;
   right?: ReactNode;
+  box?: number | string | (number | string)[];
   children: ReactNode;
   className?: string;
+  bodyClassName?: string;
 }) {
+  const boxes = box === undefined ? [] : Array.isArray(box) ? box : [box];
   return (
-    <section id={`box-${n}`} className={`min-w-0 scroll-mt-20 rounded-2xl border border-slate-200/80 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)] ${className}`}>
-      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
-        <div className="flex items-start gap-3">
-          {icon && <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/10">{icon}</div>}
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-700">Box {n}</p>
-            <h2 className="text-[15px] font-semibold text-slate-900">{name}</h2>
-            {hint && <p className="mt-0.5 text-xs text-slate-500">{hint}</p>}
+    <section className={`min-w-0 rounded-2xl border border-slate-200/80 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)] ${className}`}>
+      {(title || right) && (
+        <header className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
+          <div className="flex min-w-0 items-start gap-3">
+            {icon && <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/10">{icon}</div>}
+            <div className="min-w-0">
+              <h2 className="flex flex-wrap items-center gap-2 text-[15px] font-semibold text-slate-900">
+                {title}
+                {boxes.map((b) => (
+                  <BoxTag key={b} n={b} />
+                ))}
+              </h2>
+              {sub && <p className="mt-0.5 text-xs text-slate-500">{sub}</p>}
+            </div>
           </div>
-        </div>
-        {right}
-      </header>
-      <div className="p-5">{children}</div>
+          {right}
+        </header>
+      )}
+      <div className={bodyClassName}>{children}</div>
     </section>
+  );
+}
+
+export function PageHeader({ title, sub, right, box }: { title: string; sub?: ReactNode; right?: ReactNode; box?: (number | string)[] }) {
+  return (
+    <div className="flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <h1 className="flex flex-wrap items-center gap-2 text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
+          {title}
+          {box?.map((b) => <BoxTag key={b} n={b} />)}
+        </h1>
+        {sub && <p className="mt-1 text-sm text-slate-500">{sub}</p>}
+      </div>
+      {right && <div className="flex flex-wrap items-center gap-2">{right}</div>}
+    </div>
+  );
+}
+
+export function EmptyState({ icon, title, body, action }: { icon: ReactNode; title: string; body: string; action?: ReactNode }) {
+  return (
+    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 px-4 py-10 text-center">
+      <div className="grid h-10 w-10 place-items-center rounded-full bg-slate-100 text-slate-400">{icon}</div>
+      <p className="mt-3 text-sm font-semibold text-slate-700">{title}</p>
+      <p className="mt-1 max-w-sm text-xs text-slate-500">{body}</p>
+      {action && <div className="mt-4">{action}</div>}
+    </div>
+  );
+}
+
+export function MiniStat({ label, value, hint, tone }: { label: string; value: ReactNode; hint?: ReactNode; tone?: Tone }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+      <p className="text-[11px] font-medium text-slate-500">{label}</p>
+      <p className={`mt-0.5 text-lg font-semibold tabular-nums ${tone ? TONE[tone].text : "text-slate-900"}`}>{value}</p>
+      {hint && <p className="text-[11px] text-slate-400">{hint}</p>}
+    </div>
+  );
+}
+
+export function ProgressBar({ value, tone = "green", className = "" }: { value: number; tone?: Tone; className?: string }) {
+  return (
+    <div className={`h-1.5 overflow-hidden rounded-full bg-slate-100 ${className}`}>
+      <div className={`h-full rounded-full transition-all duration-500 ${TONE[tone].dot}`} style={{ width: `${Math.max(0, Math.min(100, value * 100))}%` }} />
+    </div>
   );
 }
 

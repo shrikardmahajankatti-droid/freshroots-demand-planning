@@ -105,9 +105,9 @@ export function TrendChart({ row }: { row: SkuResult }) {
         <YAxis tick={AXIS} tickLine={false} axisLine={false} />
         <Tooltip {...TOOLTIP} />
         <Legend iconType="plainline" wrapperStyle={{ fontSize: 12, paddingTop: 4 }} />
-        <Line type="monotone" dataKey="units" name="Units sold" stroke="#059669" strokeWidth={2.5} dot={{ r: 2.5, fill: "#059669" }} activeDot={{ r: 5 }} />
-        <Line dataKey="avg4" name="4-wk avg" stroke="#ef4444" strokeWidth={1.75} strokeDasharray="6 4" dot={false} />
-        <Line dataKey="avg12" name="12-wk avg" stroke="#64748b" strokeWidth={1.75} strokeDasharray="6 4" dot={false} />
+        <Line type="monotone" dataKey="units" name="Units sold" stroke="#059669" strokeWidth={2.5} dot={{ r: 2.5, fill: "#059669" }} activeDot={{ r: 5 }} animationDuration={500} />
+        <Line dataKey="avg4" name="4-wk avg" stroke="#ef4444" strokeWidth={1.75} strokeDasharray="6 4" dot={false} animationDuration={500} />
+        <Line dataKey="avg12" name="12-wk avg" stroke="#64748b" strokeWidth={1.75} strokeDasharray="6 4" dot={false} animationDuration={500} />
       </LineChart>
     </ResponsiveContainer>
   );
