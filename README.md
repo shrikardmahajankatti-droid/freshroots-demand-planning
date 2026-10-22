@@ -62,6 +62,21 @@ If the key is missing, the call fails, the model declines, or the reply isn't va
 
 Or from the CLI: `npx vercel` (preview), then `npx vercel --prod`.
 
+## UI
+
+The app is laid out as a SaaS workspace: a dark sidebar that shows the live status of every pipeline box, a sticky top bar, and box-labelled cards. On first visit the demo workspace loads and runs automatically, so the dashboard is never empty. **Load demo data** in the top bar reloads it, and each file card has **Upload / Replace** for your own CSVs.
+
+Four [React Bits](https://reactbits.dev) components are used (copied into `components/reactbits/`). All of them respect `prefers-reduced-motion`:
+
+| Component | Where |
+|---|---|
+| Aurora | Soft WebGL background in the Box 1 banner only (client-only, dark fallback) |
+| ShinyText | Banner headline |
+| SpotlightCard | KPI tiles in Box 6 |
+| CountUp | KPI numbers |
+
+React Bits is MIT + Commons Clause: free to use in this app, but the components themselves may not be resold as a template or component pack. Icons come from lucide-react.
+
 ## Project layout
 
 ```
@@ -69,6 +84,8 @@ lib/rules.ts            all rule logic: pure, no UI, no AI (parsing, joins, R1â€
 lib/csv.ts              browser CSV parsing (papaparse) + header validation + downloads
 app/page.tsx            the 8-box UI (state in memory only)
 components/Charts.tsx   recharts: weeks-of-cover bars, sales trend
+components/ui.tsx       shared UI: box cards, chips, buttons, KPI tiles, toasts
+components/reactbits/   React Bits components (Aurora, ShinyText, SpotlightCard, CountUp)
 app/api/explain/route.ts  the only server route: Claude call + JSON validation
 tests/rules.test.ts     acceptance tests
 public/demo/            demo CSVs (real data + test SKU016)
