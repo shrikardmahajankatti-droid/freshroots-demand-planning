@@ -2,11 +2,18 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import Papa from "papaparse";
 import { describe, expect, it } from "vitest";
+import readXlsxFile from "read-excel-file/node";
 import {
   buildDataset,
   decideAction,
   extractJsonArray,
+  cellToString,
+  detectKind,
   missingHeaders,
+  sheetToRecords,
+  nextRunOnOrAfter,
+  planCalendar,
+  toIcs,
   overrideStats,
   parseIsoWeek,
   poRows,
@@ -191,5 +198,79 @@ describe("helpers", () => {
     const st = overrideStats(run.rows, dec);
     expect(st.overrideRate).toBe(1);
     expect(st.killCriterion).toBe(true);
+  });
+});
+
+describe("PO calendar", () => {
+  const plan = planCalendar(run.rows, "2026-10-19", { today: "2026-10-23", leadDays: 7 });
+  const find = (sku: string, kind: string) => plan.find((e) => e.skuId === sku && e.kind === kind);
+
+  it("reorders in this PO are scheduled on the as-of date", () => {
+    expect(find("SKU001", "order")).toMatchObject({ date: "2026-10-19", qty: 750, inCurrentPo: true });
+    expect(find("SKU001", "stockout")?.date).toBe("2026-11-11"); // 3.35 wks
+  });
+  it("HOLD SKU orders 7 days before cover hits the min window", () => {
+    expect(find("SKU002", "order")).toMatchObject({ date: "2026-11-19", qty: 200, status: "upcoming" });
+  });
+  it("a past order-by date moves to the next Mon/Thu run, never earlier", () => {
+    expect(find("SKU008", "order")).toMatchObject({ date: "2026-10-26", status: "due" });
+    expect(nextRunOnOrAfter("2026-10-22")).toBe("2026-10-22");
+  });
+  it("paused SKUs get a resume date and a future order date", () => {
+    expect(find("SKU006", "resume")?.date).toBe("2026-12-15");
+    expect(find("SKU006", "order")?.date).toBe("2027-02-02");
+    expect(find("SKU006", "stockout")).toBeUndefined(); // beyond 120-day horizon
+  });
+  it("lead time 0 shifts order dates", () => {
+    const p0 = planCalendar(run.rows, "2026-10-19", { today: "2026-10-23", leadDays: 0 });
+    expect(p0.find((e) => e.skuId === "SKU002" && e.kind === "order")?.date).toBe("2026-11-26");
+  });
+  it("exports an .ics feed of order and resume events", () => {
+    const ics = toIcs(plan, "2026-10-23T09:00:00.000Z");
+    expect(ics).toContain("BEGIN:VCALENDAR");
+    expect(ics).toContain("DTSTART;VALUE=DATE:20261119");
+    expect(ics).not.toContain("stockout-");
+  });
+});
+
+describe("uploads: header matching and Excel", () => {
+  it("matches each input by its headers, in any order and with extra columns", () => {
+    expect(detectKind(["Units_Sold", "Week", "SKU_ID"]).kind).toBe("sales");
+    expect(detectKind(["SKU_ID", "Location", "Units_On_Hand", "As_Of_Date", "Notes"]).kind).toBe("inventory");
+    expect(detectKind(["Distributor_ID", "Distributor_Name", "Region", "Status"]).kind).toBe("distributors");
+    const miss = detectKind(["SKU_ID", "Week"]);
+    expect(miss.kind).toBeNull();
+    expect(miss.closest).toBe("sales");
+    expect(miss.missing).toEqual(["Units_Sold"]);
+  });
+
+  it("normalises spreadsheet cells to CSV-style strings", () => {
+    expect(cellToString(new Date(Date.UTC(2026, 9, 19)))).toBe("2026-10-19");
+    expect(cellToString(true)).toBe("TRUE");
+    expect(cellToString(261)).toBe("261");
+    expect(cellToString(null)).toBe("");
+    expect(sheetToRecords([[], ["SKU_ID", "Week", "Units_Sold"], ["SKU001", "2026-W27", 194], [null, null, null]])).toEqual({
+      fields: ["SKU_ID", "Week", "Units_Sold"],
+      rows: [{ SKU_ID: "SKU001", Week: "2026-W27", Units_Sold: "194" }],
+    });
+  });
+
+  it("a 5-sheet workbook gives the same results as the CSVs", async () => {
+    const sheets = await readXlsxFile(join(__dirname, "fixtures", "freshroots_inputs.xlsx"));
+    expect(sheets).toHaveLength(5);
+    const inputs: Partial<RawInputs> = {};
+    for (const sh of sheets) {
+      const { fields, rows } = sheetToRecords(sh.data as unknown[][]);
+      const k = detectKind(fields).kind;
+      expect(k).not.toBeNull();
+      inputs[k!] = rows;
+    }
+    const fromXlsx = byId(runRules(buildDataset(inputs as RawInputs)).rows);
+    for (const id of Object.keys(rows)) {
+      expect(fromXlsx[id].action).toBe(rows[id].action);
+      expect(fromXlsx[id].qty).toBe(rows[id].qty);
+      expect(fromXlsx[id].weeksOfCover).toBeCloseTo(rows[id].weeksOfCover!, 6);
+    }
+    expect(fromXlsx.SKU001.qty).toBe(750);
   });
 });

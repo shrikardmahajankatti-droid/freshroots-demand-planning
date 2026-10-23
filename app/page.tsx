@@ -1,16 +1,18 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
-import { BookOpen, ChevronRight, Database, LayoutDashboard, Leaf, ListChecks, Menu, Play, Sparkles, Truck, UserCheck, X } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { BookOpen, CalendarDays, ChevronRight, Cloud, CloudOff, Database, LayoutDashboard, Leaf, ListChecks, Menu, Play, Sparkles, Truck, UploadCloud, UserCheck, X } from "lucide-react";
 import { BoxLabelContext, Button, Chip, Toasts } from "@/components/ui";
-import { WsContext, monthName, ts, useWorkspaceState, type Tab, type Workspace } from "@/components/workspace";
+import { WsContext, monthName, ts, useWorkspaceState, useWs, type Tab, type Workspace } from "@/components/workspace";
 import { ActionList } from "@/components/views/ActionList";
+import { Calendar } from "@/components/views/Calendar";
 import { DataSources } from "@/components/views/DataSources";
 import { Exceptions } from "@/components/views/Exceptions";
 import { Overview } from "@/components/views/Overview";
 import { PurchaseOrders } from "@/components/views/PurchaseOrders";
 import { RulesSettings } from "@/components/views/RulesSettings";
 import { SkuDrawer } from "@/components/views/SkuDrawer";
+import { UploadDialog } from "@/components/views/UploadDialog";
 
 interface NavItem {
   id: Tab;
@@ -35,8 +37,17 @@ function navItems(ws: Workspace): { outputs: NavItem[]; configure: NavItem[] } {
         id: "orders",
         label: "Purchase orders",
         icon: <Truck className="h-4 w-4" />,
-        badge: ws.run ? ws.g2 ? <Badge tone="green">Signed</Badge> : ws.g1.complete ? <Badge tone="amber">Ready</Badge> : <Badge>Draft</Badge> : undefined,
+        badge: ws.run
+          ? ws.hubspot.state === "done"
+            ? <Badge tone="green">In HubSpot</Badge>
+            : ws.g2
+              ? <Badge tone="green">Signed</Badge>
+              : ws.g1.complete
+                ? <Badge tone="amber">Ready</Badge>
+                : <Badge>Draft</Badge>
+          : undefined,
       },
+      { id: "calendar", label: "PO calendar", icon: <CalendarDays className="h-4 w-4" /> },
     ],
     configure: [
       { id: "rules", label: "Rules & settings", icon: <BookOpen className="h-4 w-4" />, badge: ws.stats.killCriterion ? <Badge tone="red">Kill switch</Badge> : undefined },
@@ -55,6 +66,7 @@ const TITLES: Record<Tab, string> = {
   exceptions: "Exceptions review",
   actions: "Action list",
   orders: "Purchase orders",
+  calendar: "PO calendar",
   rules: "Rules & settings",
   data: "Data sources",
 };
@@ -63,6 +75,23 @@ export default function Page() {
   const ws = useWorkspaceState();
   const [navOpen, setNavOpen] = useState(false);
   const nav = navItems(ws);
+  const { setUploadOpen } = ws;
+
+  // Dragging files anywhere onto the window opens the upload dialog; a stray drop never navigates away.
+  useEffect(() => {
+    const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
+    const onEnter = (e: DragEvent) => hasFiles(e) && setUploadOpen(true);
+    const block = (e: DragEvent) => hasFiles(e) && e.preventDefault();
+    window.addEventListener("dragenter", onEnter);
+    window.addEventListener("dragover", block);
+    window.addEventListener("drop", block);
+    return () => {
+      window.removeEventListener("dragenter", onEnter);
+      window.removeEventListener("dragover", block);
+      window.removeEventListener("drop", block);
+    };
+  }, [setUploadOpen]);
+
   const go = (t: Tab) => {
     ws.setTab(t);
     setNavOpen(false);
@@ -103,9 +132,10 @@ export default function Page() {
             </nav>
 
             <div className="space-y-3 border-t border-white/5 p-4">
+              <DbChip />
               <div className="flex items-center gap-2 rounded-lg bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300 ring-1 ring-inset ring-emerald-500/20">
                 <Sparkles className="h-3.5 w-3.5" />
-                {ws.explStatus?.source === "ai" ? "Claude explanations on" : "Free mode · no paid API"}
+                {ws.explStatus?.source === "ai" ? "Gemini explanations on" : "Template reasons · no AI"}
               </div>
               <div className="flex items-center gap-3">
                 <div className="grid h-9 w-9 place-items-center rounded-full bg-gradient-to-br from-slate-700 to-slate-800 text-sm font-semibold text-white">
@@ -138,6 +168,11 @@ export default function Page() {
                       <Chip tone={ws.fest.on ? "green" : "slate"} dot>Uplift {ws.fest.on ? "ON" : "OFF"}</Chip>
                     </span>
                   )}
+                  <Button variant="secondary" size="sm" onClick={() => ws.setUploadOpen(true)}>
+                    <UploadCloud className="h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">Upload new data</span>
+                    <span className="sm:hidden">Upload</span>
+                  </Button>
                   <Button size="sm" onClick={ws.runForecast} disabled={!ws.allLoaded}>
                     <Play className="h-3.5 w-3.5 fill-current" />
                     <span className="hidden sm:inline">{ws.run ? "Re-run" : "Run forecast"}</span>
@@ -167,20 +202,49 @@ export default function Page() {
               {ws.tab === "exceptions" && <Exceptions />}
               {ws.tab === "actions" && <ActionList />}
               {ws.tab === "orders" && <PurchaseOrders />}
+              {ws.tab === "calendar" && <Calendar />}
               {ws.tab === "rules" && <RulesSettings />}
               {ws.tab === "data" && <DataSources />}
               <footer className="mt-10 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-4 text-xs text-slate-400">
-                <span>Freshroots Demand Planner · prototype · state lives in this browser tab</span>
+                <span>Freshroots Demand Planner · {ws.dbStatus.state === "ok" ? "saved in Neon Postgres" : "not saved — state lives in this browser tab"}</span>
                 <span>Rules run in code · AI explains · humans decide</span>
               </footer>
             </main>
           </div>
 
           <SkuDrawer />
+          <UploadDialog />
           <Toasts items={ws.toasts} onDismiss={ws.dismissToast} />
         </div>
       </BoxLabelContext.Provider>
     </WsContext.Provider>
+  );
+}
+
+function DbChip() {
+  const { dbStatus, setTab } = useWs();
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => tick((n) => n + 1), 30_000);
+    return () => clearInterval(t);
+  }, []);
+  const ago = (iso: string) => {
+    const s = Math.round((Date.now() - Date.parse(iso)) / 1000);
+    return s < 45 ? "just now" : s < 3600 ? `${Math.round(s / 60)}m ago` : ts(iso);
+  };
+  const [cls, Icon, text] =
+    dbStatus.state === "ok"
+      ? ["bg-sky-500/10 text-sky-300 ring-sky-500/20", Cloud, dbStatus.saving ? "Saving to Neon…" : dbStatus.savedAt ? `Saved to Neon · ${ago(dbStatus.savedAt)}` : "Connected to Neon"]
+      : dbStatus.state === "error"
+        ? ["bg-red-500/10 text-red-300 ring-red-500/20", CloudOff, "Neon unavailable · not saving"]
+        : dbStatus.state === "off"
+          ? ["bg-white/5 text-slate-400 ring-white/10", CloudOff, "No database · not saved"]
+          : ["bg-white/5 text-slate-400 ring-white/10", Cloud, "Connecting to Neon…"];
+  return (
+    <button onClick={() => setTab("data")} className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs ring-1 ring-inset ${cls}`}>
+      <Icon className="h-3.5 w-3.5 shrink-0" />
+      <span className="truncate">{text}</span>
+    </button>
   );
 }
 

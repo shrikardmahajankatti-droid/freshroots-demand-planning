@@ -221,7 +221,7 @@ export function RulesSettings() {
             <MiniStat label="Override rate" value={stats.resolved ? `${Math.round(stats.overrideRate * 100)}%` : "—"} hint={`${stats.overrides} of ${stats.resolved} reviewed`} tone={stats.killCriterion ? "red" : undefined} />
             <MiniStat label="Acceptance rate" value={stats.resolved ? `${Math.round(stats.acceptanceRate * 100)}%` : "—"} hint={`${stats.approvals} approved as-is`} tone="green" />
             <MiniStat label="Threshold" value={`${KILL_CRITERION_OVERRIDE_RATE * 100}%`} hint="override rate" />
-            <MiniStat label="Override log" value={log.length} hint="this session" />
+            <MiniStat label="Override log" value={log.length} hint={ws.dbStatus.state === "ok" ? "all saved cycles" : "this session"} />
           </div>
           <p className="mt-4 text-xs leading-relaxed text-slate-600">
             <b>What to do when it trips:</b> stop relying on the automatic list, sit with Raghav to see which rule he keeps correcting (the override reasons show this), update Rules v1, then re-run. Overrides feed back from procurement (step 8) to the rules (step 3).
@@ -249,9 +249,9 @@ export function RulesSettings() {
         <Card title="Guardrails" sub="Non-negotiables built into the system" icon={<Gavel className="h-4 w-4" />}>
           <ul className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <Guard title="Code decides, AI explains" body="Rules run in code in a fixed order. The AI writes reasons and flags; it never sets or edits a quantity." />
-            <Guard title="Two humans before any PO" body="Raghav resolves every exception, then procurement approves. The PO download stays locked until both happen." />
+            <Guard title="Two humans before any PO" body="Raghav resolves every exception, then procurement approves. Nothing reaches HubSpot, and the PO download stays locked, until both happen." />
             <Guard title="Missing data → exception" body="Bad or missing data becomes a review item at HOLD 0 — never a guess." />
-            <Guard title="Nothing auto-ordered" body="The PO list is a CSV for manual upload to Zoho. No order is placed by the system." />
+            <Guard title="Nothing sent to suppliers" body="Approval creates Orders in HubSpot for procurement to action. The system never contacts a supplier or places an order by itself." />
           </ul>
         </Card>
       </Anchor>
@@ -275,12 +275,32 @@ export function RulesSettings() {
             <Setting label="Planner (Gate 1)" desc="Name recorded on approvals and overrides.">
               <input value={ws.g1Name} onChange={(e) => ws.setG1Name(e.target.value)} disabled={!!ws.g2} className="h-9 w-44 rounded-lg border border-slate-300 px-2.5 text-sm disabled:bg-slate-50" />
             </Setting>
-            <Setting label="Procurement approver (Gate 2)" desc="Name recorded on the PO export.">
+            <Setting label="Procurement approver (Gate 2)" desc="Name recorded on the HubSpot orders and the PO export.">
               <input value={ws.g2Name} onChange={(e) => ws.setG2Name(e.target.value)} disabled={!!ws.g2} placeholder="e.g. Priya" className="h-9 w-44 rounded-lg border border-slate-300 px-2.5 text-sm disabled:bg-slate-50" />
             </Setting>
             <Setting label="AI explanations" desc={ws.explStatus?.note ?? "Runs after the forecast."}>
               <Chip tone={ws.explStatus?.source === "ai" ? "green" : "slate"} dot>
-                <Sparkles className="h-3 w-3" /> {ws.explStatus?.source === "ai" ? "Claude" : "Free mode"}
+                <Sparkles className="h-3 w-3" /> {ws.explStatus?.source === "ai" ? "Gemini" : "Templates"}
+              </Chip>
+            </Setting>
+            <Setting label="Supplier lead time" desc="Used by the PO calendar: order this many days before cover falls below the minimum window.">
+              <span className="flex items-center gap-2 text-sm text-slate-600">
+                <input type="number" min={0} max={60} value={ws.leadDays} onChange={(e) => ws.setLeadDays(Math.max(0, Math.min(60, Number(e.target.value) || 0)))} className="h-9 w-20 rounded-lg border border-slate-300 px-2.5 text-sm" />
+                days
+              </span>
+            </Setting>
+            <Setting
+              label="HubSpot"
+              desc={
+                ws.hubspot.state === "done"
+                  ? `${ws.hubspot.results.length} orders created this cycle.`
+                  : ws.hubspot.state === "error"
+                    ? ws.hubspot.error
+                    : "On procurement approval, one Order per distributor is created with SKUs as line items."
+              }
+            >
+              <Chip tone={ws.hubspot.state === "done" ? "green" : ws.hubspot.state === "error" ? (ws.hubspot.configured ? "red" : "slate") : "slate"} dot>
+                {ws.hubspot.state === "done" ? "Synced" : ws.hubspot.state === "error" ? (ws.hubspot.configured ? "Error" : "Not connected") : ws.hubspot.state === "syncing" ? "Syncing" : "Waiting for approval"}
               </Chip>
             </Setting>
             <Setting label="Show component-map labels" desc="Tag each screen with its box (1–8) from the class component map.">

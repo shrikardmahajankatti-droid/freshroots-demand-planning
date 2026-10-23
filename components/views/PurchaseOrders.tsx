@@ -1,12 +1,12 @@
 "use client";
 
-import { ArrowRight, CheckCircle2, Download, Lock, ShieldCheck, Truck } from "lucide-react";
+import { ArrowRight, CheckCircle2, Download, ExternalLink, Loader2, Lock, RefreshCw, ShieldCheck, Truck } from "lucide-react";
 import { ActionBadge, Button, Callout, Card, EmptyState, MiniStat, PageHeader } from "@/components/ui";
 import { ts, useWs } from "@/components/workspace";
 
 export function PurchaseOrders() {
   const ws = useWs();
-  const { run, po, poUnits, g1, g2, rows, dataset } = ws;
+  const { run, po, poUnits, g1, g2, rows, dataset, hubspot } = ws;
   const distributors = new Map((dataset?.skus ?? []).map((s) => [s.distributor?.id ?? "", s.distributor]));
   const groups = [...new Set(po.map((p) => p.distributorId))].map((id) => ({
     id,
@@ -20,7 +20,7 @@ export function PurchaseOrders() {
       <PageHeader
         title="Purchase orders"
         box={[8]}
-        sub="The final reorder list after Raghav's review. Procurement signs off, then exports it for Zoho — nothing is ordered automatically."
+        sub="The final reorder list after Raghav's review. When procurement approves, one Order per distributor is created in HubSpot."
       />
       {!run ? (
         <Card>
@@ -96,7 +96,19 @@ export function PurchaseOrders() {
               <ol className="mt-4 space-y-2 text-sm">
                 <Gate done={g1.complete} label="Raghav reviewed exceptions" detail={`${g1.resolved}/${g1.total} resolved by ${ws.g1Name || "planner"}`} />
                 <Gate done={!!g2} label="Procurement approved" detail={g2 ? `${g2.by} · ${ts(g2.at)}` : "Waiting"} />
-                <Gate done={ws.poDownloaded} label="Exported for Zoho" detail={ws.poDownloaded ? "CSV downloaded" : "Manual upload"} />
+                <Gate
+                  done={hubspot.state === "done"}
+                  label="Created in HubSpot"
+                  detail={
+                    hubspot.state === "done"
+                      ? `${hubspot.results.length} order${hubspot.results.length === 1 ? "" : "s"} · ${ts(hubspot.at)}`
+                      : hubspot.state === "syncing"
+                        ? "Sending…"
+                        : hubspot.state === "error"
+                          ? hubspot.configured ? "Failed — see below" : "Not connected"
+                          : "On approval"
+                  }
+                />
               </ol>
               <div className="mt-4 space-y-2">
                 <input
@@ -107,16 +119,17 @@ export function PurchaseOrders() {
                   className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm disabled:bg-slate-50"
                 />
                 <Button variant="dark" className="w-full" onClick={ws.approveFinal} disabled={locked || !ws.g2Name.trim() || !!g2}>
-                  <ShieldCheck className="h-4 w-4" /> Approve final list
+                  <ShieldCheck className="h-4 w-4" /> Approve &amp; create in HubSpot
                 </Button>
-                <Button className="w-full" onClick={ws.downloadPo} disabled={!g2}>
+                <Button variant="secondary" className="w-full" onClick={ws.downloadPo} disabled={!g2}>
                   <Download className="h-4 w-4" /> Download PO list (CSV)
                 </Button>
               </div>
               {locked && <p className="mt-3 text-xs text-violet-700">Approval unlocks once every exception is reviewed.</p>}
               {!locked && !g2 && !ws.g2Name.trim() && <p className="mt-3 text-xs text-slate-500">Enter the approver&apos;s name to sign off.</p>}
               {g2 && <Callout tone="green">Signed off by <b>{g2.by}</b>. Raghav&apos;s decisions are locked for this cycle.</Callout>}
-              <p className="mt-3 text-[11px] text-slate-400">Only REORDER lines with qty &gt; 0 are included. The CSV stands in for Zoho; nothing is auto-ordered.</p>
+              {g2 && <HubspotPanel />}
+              <p className="mt-3 text-[11px] text-slate-400">Only REORDER lines with qty &gt; 0 are included. Orders are created in HubSpot only after both approvals; nothing is sent to suppliers automatically.</p>
             </Card>
           </div>
         </div>
@@ -136,5 +149,51 @@ function Gate({ done, label, detail }: { done: boolean; label: string; detail: s
         <span className="block text-xs text-slate-500">{detail}</span>
       </span>
     </li>
+  );
+}
+
+function HubspotPanel() {
+  const { hubspot, retryHubspot } = useWs();
+  if (hubspot.state === "idle") return null;
+  return (
+    <div className="mt-3 rounded-xl border border-slate-200 p-3">
+      <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+        <span className="grid h-5 w-5 place-items-center rounded bg-[#ff7a59] text-[10px] font-bold text-white">H</span> HubSpot
+      </p>
+      {hubspot.state === "syncing" && (
+        <p className="mt-2 flex items-center gap-2 text-sm text-slate-600"><Loader2 className="h-4 w-4 animate-spin" /> Creating orders in HubSpot…</p>
+      )}
+      {hubspot.state === "done" && (
+        <ul className="mt-2 space-y-1.5">
+          {hubspot.results.map((r) => (
+            <li key={r.orderId} className="flex items-center justify-between gap-2 text-sm">
+              <span className="min-w-0">
+                <span className="block truncate font-medium text-slate-900">{r.distributorName}</span>
+                <span className="block text-[11px] text-slate-500">Order {r.orderId} · {r.lines} lines · {r.units.toLocaleString("en-IN")} units{r.status === "existing" ? " · already existed" : ""}</span>
+              </span>
+              {r.url && (
+                <a href={r.url} target="_blank" rel="noreferrer" className="flex shrink-0 items-center gap-1 text-xs font-semibold text-[#ff5c35] hover:underline">
+                  Open <ExternalLink className="h-3 w-3" />
+                </a>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {hubspot.state === "error" && (
+        <div className="mt-2 space-y-2 text-xs">
+          <p className={hubspot.configured ? "text-red-700" : "text-slate-600"}>{hubspot.error}</p>
+          {hubspot.missingScopes.length > 0 && (
+            <div className="rounded-lg bg-red-50 p-2 text-red-800">
+              Add these scopes to the HubSpot private app, then retry:
+              <ul className="mt-1 list-disc pl-4 font-mono text-[11px]">{hubspot.missingScopes.map((s) => <li key={s}>{s}</li>)}</ul>
+            </div>
+          )}
+          {hubspot.configured && (
+            <Button variant="secondary" size="sm" onClick={retryHubspot}><RefreshCw className="h-3.5 w-3.5" /> Retry HubSpot</Button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

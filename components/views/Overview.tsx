@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useState, type ReactNode } from "react";
-import { ArrowRight, Check, ClipboardCheck, Database, FileDown, Gauge, PackageCheck, PauseCircle, Play, ShieldCheck, Sparkles, TriangleAlert, UserCheck } from "lucide-react";
+import { ArrowRight, Check, UploadCloud, ClipboardCheck, Database, FileDown, Gauge, PackageCheck, PauseCircle, Play, ShieldCheck, Sparkles, TriangleAlert, UserCheck } from "lucide-react";
 import { CoverChart } from "@/components/Charts";
 import ShinyText from "@/components/reactbits/ShinyText/ShinyText";
 import { ActionBadge, BoxTag, Button, Card, EmptyState, Kpi } from "@/components/ui";
@@ -27,7 +27,14 @@ export function Overview() {
     { label: "Forecast run", detail: run ? ts(run.at) : "Not run yet", done: !!run, active: ws.allLoaded && !run, tab: "actions", icon: <Gauge className="h-3.5 w-3.5" /> },
     { label: "Raghav review", detail: run ? `${g1.resolved}/${g1.total} exceptions` : "—", done: !!run && g1.complete, active: !!run && !g1.complete, tab: "exceptions", icon: <UserCheck className="h-3.5 w-3.5" /> },
     { label: "Procurement sign-off", detail: g2 ? `by ${g2.by}` : "Waiting", done: !!g2, active: !!run && g1.complete && !g2, tab: "orders", icon: <ShieldCheck className="h-3.5 w-3.5" /> },
-    { label: "PO exported", detail: poDownloaded ? "CSV downloaded" : "For Zoho upload", done: poDownloaded, active: !!g2 && !poDownloaded, tab: "orders", icon: <FileDown className="h-3.5 w-3.5" /> },
+    {
+      label: "Sent to HubSpot",
+      detail: ws.hubspot.state === "done" ? `${ws.hubspot.results.length} orders created` : ws.hubspot.state === "error" ? "Needs attention" : poDownloaded ? "CSV downloaded" : "On approval",
+      done: ws.hubspot.state === "done",
+      active: !!g2 && ws.hubspot.state !== "done",
+      tab: "orders",
+      icon: <FileDown className="h-3.5 w-3.5" />,
+    },
   ];
 
   return (
@@ -59,6 +66,9 @@ export function Overview() {
               <Button size="lg" onClick={ws.runForecast} disabled={!ws.allLoaded} className="!bg-white !text-slate-900 hover:!bg-emerald-50 disabled:!bg-white/20 disabled:!text-white/50">
                 <Play className="h-4 w-4 fill-current" /> {run ? "Re-run forecast" : "Run forecast"}
               </Button>
+              <button onClick={() => ws.setUploadOpen(true)} className="inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold text-white/90 ring-1 ring-inset ring-white/25 hover:bg-white/10">
+                <UploadCloud className="h-3.5 w-3.5" /> Upload new data
+              </button>
               {ws.stale && <p className="text-xs text-amber-200">Uplift setting changed — re-run to apply.</p>}
             </div>
           </div>

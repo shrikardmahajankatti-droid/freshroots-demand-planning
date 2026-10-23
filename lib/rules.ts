@@ -43,6 +43,65 @@ export function missingHeaders(kind: FileKind, fields: string[]): string[] {
   return REQUIRED_HEADERS[kind].filter((h) => !have.has(h));
 }
 
+export interface KindMatch {
+  /** The input this sheet is, or null when no input's headers all match. */
+  kind: FileKind | null;
+  /** Closest input by share of required headers present. */
+  closest: FileKind;
+  missing: string[];
+}
+
+/**
+ * Works out which of the 5 inputs a sheet is from its headers alone, so files can be
+ * dropped in any order with any name. Ties go to the input with more required columns.
+ */
+export function detectKind(fields: string[]): KindMatch {
+  const kinds = Object.keys(REQUIRED_HEADERS) as FileKind[];
+  const scored = kinds
+    .map((k) => {
+      const missing = missingHeaders(k, fields);
+      const need = REQUIRED_HEADERS[k].length;
+      return { k, missing, score: (need - missing.length) / need, need };
+    })
+    .sort((x, y) => y.score - x.score || y.need - x.need);
+  const best = scored[0];
+  return { kind: best.missing.length === 0 ? best.k : null, closest: best.k, missing: best.missing };
+}
+
+/** Turns a spreadsheet cell into the string a CSV would have held. */
+export function cellToString(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  if (v instanceof Date) {
+    if (Number.isNaN(v.getTime())) return "";
+    const utc = v.getUTCHours() === 0 && v.getUTCMinutes() === 0;
+    const y = utc ? v.getUTCFullYear() : v.getFullYear();
+    const m = (utc ? v.getUTCMonth() : v.getMonth()) + 1;
+    const d = utc ? v.getUTCDate() : v.getDate();
+    return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  }
+  if (typeof v === "boolean") return v ? "TRUE" : "FALSE";
+  if (typeof v === "number") return Number.isInteger(v) ? String(v) : String(+v.toFixed(10));
+  return String(v).trim();
+}
+
+/** Converts a sheet's rows (first non-empty row = headers) into CSV-like records. */
+export function sheetToRecords(data: unknown[][]): { fields: string[]; rows: RawRow[] } {
+  const nonEmpty = (r: unknown[]) => r.some((c) => cellToString(c) !== "");
+  const start = data.findIndex(nonEmpty);
+  if (start < 0) return { fields: [], rows: [] };
+  const fields = data[start].map((c) => cellToString(c).replace(/^\uFEFF/, ""));
+  const rows: RawRow[] = [];
+  for (const r of data.slice(start + 1)) {
+    if (!nonEmpty(r)) continue;
+    const rec: RawRow = {};
+    fields.forEach((f, i) => {
+      if (f) rec[f] = cellToString(r[i]);
+    });
+    rows.push(rec);
+  }
+  return { fields: fields.filter(Boolean), rows };
+}
+
 // ---------------------------------------------------------------------------
 // Rules v1 constants
 // ---------------------------------------------------------------------------
@@ -829,4 +888,128 @@ function csvCell(v: unknown): string {
 
 export function toCsv(headers: string[], rows: unknown[][]): string {
   return [headers, ...rows].map((r) => r.map(csvCell).join(",")).join("\n") + "\n";
+}
+
+// ---------------------------------------------------------------------------
+// PO calendar: when to order what (projection, not a decision)
+// ---------------------------------------------------------------------------
+
+export const DEFAULT_LEAD_DAYS = 7;
+const DAY_MS = 86_400_000;
+
+/** Adds days to a YYYY-MM-DD date (UTC). */
+export function addDays(iso: string, days: number): string {
+  return new Date(Date.parse(`${iso}T00:00:00Z`) + days * DAY_MS).toISOString().slice(0, 10);
+}
+
+export function diffDays(a: string, b: string): number {
+  return Math.round((Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / DAY_MS);
+}
+
+/** First scheduled forecast run (Monday or Thursday) on or after `iso`. */
+export function nextRunOnOrAfter(iso: string): string {
+  for (let i = 0; i < 7; i++) {
+    const d = addDays(iso, i);
+    const dow = new Date(`${d}T00:00:00Z`).getUTCDay();
+    if (dow === 1 || dow === 4) return d;
+  }
+  return iso;
+}
+
+export type PlanKind = "order" | "stockout" | "resume";
+export type PlanStatus = "overdue" | "due" | "upcoming";
+
+export interface PlanEvent {
+  date: string;
+  kind: PlanKind;
+  skuId: string;
+  name: string;
+  distributorId: string;
+  action: Action;
+  qty: number;
+  /** True for reorders already in this cycle's PO. */
+  inCurrentPo: boolean;
+  note: string;
+  status: PlanStatus;
+}
+
+/**
+ * Projects, per SKU, when to place the next PO, when stock would run out and when an
+ * overstock clears — assuming demand stays at today's expected weekly demand.
+ * The rules engine still decides every actual order; this only schedules.
+ */
+export function planCalendar(
+  rows: SkuResult[],
+  asOf: string,
+  opts: { today: string; leadDays?: number; horizonDays?: number },
+): PlanEvent[] {
+  const lead = Math.max(0, Math.round(opts.leadDays ?? DEFAULT_LEAD_DAYS));
+  const horizon = opts.horizonDays ?? 120;
+  const end = addDays(opts.today, horizon);
+  const status = (date: string): PlanStatus => {
+    const d = diffDays(date, opts.today);
+    return d < 0 ? "overdue" : d <= 7 ? "due" : "upcoming";
+  };
+  const out: PlanEvent[] = [];
+
+  for (const r of rows) {
+    if (r.weeksOfCover === null || r.minWindow === null || r.maxWindow === null || !r.standardReorderQty || r.dataIssues.length) continue;
+    const base = { skuId: r.skuId, name: r.name, distributorId: r.distributorId, action: r.action };
+
+    const stockout = addDays(asOf, Math.floor(r.weeksOfCover * 7));
+    if (stockout <= end)
+      out.push({ ...base, kind: "stockout", date: stockout, qty: 0, inCurrentPo: false, note: `Stock runs out at ${fmt(r.expectedWeeklyDemand)}/wk if nothing arrives`, status: status(stockout) });
+
+    if (isReorder(r.action)) {
+      out.push({ ...base, kind: "order", date: asOf, qty: r.qty, inCurrentPo: true, note: "In this cycle's PO — needs both approvals", status: status(asOf) });
+    } else {
+      const qty = Math.ceil(r.standardReorderQty * (r.flags.includes("HIGH_DEMAND") ? RULES.highDemandQtyMultiplier : 1));
+      const projected = addDays(asOf, Math.floor((r.weeksOfCover - r.minWindow) * 7) - lead);
+      const late = projected < opts.today;
+      const date = late ? nextRunOnOrAfter(opts.today) : projected;
+      if (date <= end)
+        out.push({
+          ...base,
+          kind: "order",
+          date,
+          qty,
+          inCurrentPo: false,
+          note: late
+            ? `Cover reaches the ${r.minWindow}-wk minimum within the ${lead}-day lead time — expect a reorder at this run`
+            : `Order ${lead} days before cover falls below ${r.minWindow} wks`,
+          status: late ? "due" : status(date),
+        });
+    }
+
+    if (r.action === "PAUSE") {
+      const resume = addDays(asOf, Math.floor((r.weeksOfCover - r.maxWindow) * 7));
+      if (resume <= end)
+        out.push({ ...base, kind: "resume", date: resume, qty: 0, inCurrentPo: false, note: `Cover falls back to the ${r.maxWindow}-wk maximum — reorders can resume`, status: status(resume) });
+    }
+  }
+  const order: Record<PlanKind, number> = { order: 0, stockout: 1, resume: 2 };
+  return out.sort((a, b) => a.date.localeCompare(b.date) || order[a.kind] - order[b.kind] || a.skuId.localeCompare(b.skuId));
+}
+
+/** All-day iCalendar (.ics) feed for the order and resume events. */
+export function toIcs(events: PlanEvent[], stamp: string): string {
+  const esc = (t: string) => t.replace(/\\/g, "\\\\").replace(/[,;]/g, (m) => `\\${m}`).replace(/\n/g, "\\n");
+  const d = (iso: string) => iso.replace(/-/g, "");
+  const dt = stamp.replace(/[-:]/g, "").replace(/\.\d+/, "");
+  const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Freshroots//Demand Planner//EN", "CALSCALE:GREGORIAN", "X-WR-CALNAME:Freshroots PO calendar"];
+  for (const e of events.filter((x) => x.kind !== "stockout")) {
+    const summary = e.kind === "order" ? `Order ${e.name} (${e.qty} units)` : `Resume reorders: ${e.name}`;
+    lines.push(
+      "BEGIN:VEVENT",
+      `UID:${e.kind}-${e.skuId}-${d(e.date)}@freshroots`,
+      `DTSTAMP:${dt}`,
+      `DTSTART;VALUE=DATE:${d(e.date)}`,
+      `DTEND;VALUE=DATE:${d(addDays(e.date, 1))}`,
+      `SUMMARY:${esc(summary)}`,
+      `DESCRIPTION:${esc(`${e.skuId} · ${e.distributorId} · ${e.note}`)}`,
+      "END:VEVENT",
+    );
+  }
+  lines.push("END:VCALENDAR");
+  return lines.join("\r\n") + "\r\n";
 }

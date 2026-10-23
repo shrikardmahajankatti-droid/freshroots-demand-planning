@@ -197,7 +197,7 @@ export function FileRow({ kind, file, onFile }: { kind: FileKind; file?: LoadedF
           <span className="hidden sm:inline">{file ? "Replace" : "Upload"}</span>
           <input
             type="file"
-            accept=".csv,text/csv"
+            accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             className="sr-only"
             onChange={(e) => {
               onFile(kind, e.target.files?.[0]);

@@ -47,7 +47,7 @@ export function Exceptions() {
             </label>
             <p className="flex items-center gap-1.5 text-xs text-slate-500">
               <Sparkles className="h-3.5 w-3.5 text-emerald-600" />
-              {ws.explStatus?.source === "ai" ? "Reasons written by Claude." : "Reasons generated from the rules (free mode)."} Quantities always come from code.
+              {ws.explStatus?.source === "ai" ? "Reasons written by Gemini." : "Reasons generated from the rules."} Quantities always come from code.
             </p>
           </div>
 
