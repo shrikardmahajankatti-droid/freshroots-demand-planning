@@ -322,7 +322,7 @@ export function useWorkspaceState() {
     ) as Record<FileKind, LoadedFile>;
     setFiles(loaded);
     setIsDemo(res.batch.source === "demo");
-    batchIdRef.current = res.batch.id;
+    batchIdRef.current = Number(res.batch.id); // bigint ids arrive as strings
     sourceRef.current = res.batch.source;
     const r = res.run;
     if (!r) {
@@ -333,7 +333,7 @@ export function useWorkspaceState() {
     const result = runRules(ds, r.uplift_mode);
     setMode(r.uplift_mode);
     setRun({ result, at: r.run_at, mode: r.uplift_mode });
-    runIdPromise.current = Promise.resolve(r.id);
+    runIdPromise.current = Promise.resolve(Number(r.id));
     const saved = new Map(r.results.map((x) => [x.sku_id, x]));
     setExpl(
       Object.fromEntries(
